@@ -141,19 +141,47 @@ func (w *WebUI) handleMove(rw http.ResponseWriter, r *http.Request) {
 
 	w.board.MakeMove(move)
 
+	// Capture state before releasing mutex
+	gameOver := w.board.GameOver
+	currentTurn := w.board.CurrentTurn
+	aiColor := w.agent.Color
+
 	// Send response immediately after player's move
 	w.writeState(rw)
 	w.mutex.Unlock()
 
+	// Handle game over for player's winning move synchronously
+	if gameOver {
+		w.mutex.Lock()
+		gameNumber := len(w.statistics.GetStats()) + 1
+		result := stats.GameResult{
+			GameNumber: gameNumber,
+			Winner:     colorToString(w.board.Winner),
+			Epsilon:    w.agent.Epsilon,
+			MovesCount: 0,
+		}
+		w.statistics.AddGame(result)
+		w.mutex.Unlock()
+		return
+	}
+
 	// Process AI move asynchronously if it's AI's turn
-	if !w.board.GameOver && w.board.CurrentTurn == w.agent.Color {
+	if !gameOver && currentTurn == aiColor {
 		go func() {
+			// Clone board for AI computation
+			w.mutex.Lock()
+			boardClone := w.board.Clone()
+			w.mutex.Unlock()
+
+			// Compute AI move without holding mutex (can take 10+ seconds)
+			aiMove := w.agent.ChooseMove(boardClone)
+
+			// Re-acquire mutex to apply the move
 			w.mutex.Lock()
 			defer w.mutex.Unlock()
 
-			// Double check game is still not over (could have changed)
-			if !w.board.GameOver && w.board.CurrentTurn == w.agent.Color {
-				aiMove := w.agent.ChooseMove(w.board)
+			// Verify game state is still valid (game not reset, still AI's turn)
+			if !w.board.GameOver && w.board.CurrentTurn == aiColor {
 				w.board.MakeMove(aiMove)
 
 				if w.board.GameOver {
@@ -167,21 +195,6 @@ func (w *WebUI) handleMove(rw http.ResponseWriter, r *http.Request) {
 					w.statistics.AddGame(result)
 				}
 			}
-		}()
-	} else if w.board.GameOver {
-		// Handle game over for player's winning move
-		go func() {
-			w.mutex.Lock()
-			defer w.mutex.Unlock()
-
-			gameNumber := len(w.statistics.GetStats()) + 1
-			result := stats.GameResult{
-				GameNumber: gameNumber,
-				Winner:     colorToString(w.board.Winner),
-				Epsilon:    w.agent.Epsilon,
-				MovesCount: 0,
-			}
-			w.statistics.AddGame(result)
 		}()
 	}
 }
