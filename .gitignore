@@ -1,0 +1,33 @@
+# Binaries
+chess-ai
+chess-ai.exe
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Neural network weights
+neural/weights.gob
+
+# Statistics
+stats/games.json
+
+# Test binary
+*.test
+
+# Output
+*.out
+
+# Go workspace
+go.work
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
