@@ -1,0 +1,64 @@
+{
+  "games": [
+    {
+      "gameNumber": 9,
+      "winner": "black",
+      "epsilon": 0.1,
+      "movesCount": 30
+    },
+    {
+      "gameNumber": 4,
+      "winner": "black",
+      "epsilon": 0.1,
+      "movesCount": 30
+    },
+    {
+      "gameNumber": 0,
+      "winner": "black",
+      "epsilon": 0.1,
+      "movesCount": 30
+    },
+    {
+      "gameNumber": 1,
+      "winner": "black",
+      "epsilon": 0.1,
+      "movesCount": 30
+    },
+    {
+      "gameNumber": 2,
+      "winner": "black",
+      "epsilon": 0.1,
+      "movesCount": 30
+    },
+    {
+      "gameNumber": 3,
+      "winner": "black",
+      "epsilon": 0.1,
+      "movesCount": 30
+    },
+    {
+      "gameNumber": 6,
+      "winner": "black",
+      "epsilon": 0.1,
+      "movesCount": 30
+    },
+    {
+      "gameNumber": 5,
+      "winner": "black",
+      "epsilon": 0.1,
+      "movesCount": 30
+    },
+    {
+      "gameNumber": 7,
+      "winner": "black",
+      "epsilon": 0.1,
+      "movesCount": 30
+    },
+    {
+      "gameNumber": 8,
+      "winner": "black",
+      "epsilon": 0.1,
+      "movesCount": 30
+    }
+  ]
+}

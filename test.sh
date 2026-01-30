@@ -1,5 +1,6 @@
 #!/bin/bash
 # Test script for chess-ai project
+# Make executable: chmod +x test.sh
 
 set -e
 

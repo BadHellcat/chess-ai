@@ -6,13 +6,11 @@ chess-ai.exe
 *.so
 *.dylib
 
-# Neural network weights
+# Neural network weights (generated during training)
 neural/weights.gob
-neural/neural/
 
-# Statistics
+# Statistics (generated during gameplay)
 stats/games.json
-stats/stats/
 
 # Test binary
 *.test
