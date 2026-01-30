@@ -122,11 +122,8 @@ func (d *Database) loadData() error {
 	return nil
 }
 
-// saveData сохраняет данные в JSON файлы
+// saveData сохраняет данные в JSON файлы (должна вызываться только с удержанным мьютексом)
 func (d *Database) saveData() error {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-
 	// Сохраняем игры
 	gamesData, err := json.MarshalIndent(d.games, "", "  ")
 	if err != nil {
