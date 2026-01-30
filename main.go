@@ -19,7 +19,7 @@ func main() {
 	terminalMode := flag.Bool("terminal", false, "Запустить в терминальном режиме")
 	selfPlayMode := flag.Bool("self-play", false, "Режим самообучения (AI играет сам с собой)")
 	numGames := flag.Int("games", 100, "Количество игр для самообучения")
-	dbPath := flag.String("db", "data/chess.db", "Путь к базе данных SQLite")
+	dbPath := flag.String("db", "data/chess.db", "Путь к директории базы данных")
 	flag.Parse()
 
 	if *selfPlayMode {
