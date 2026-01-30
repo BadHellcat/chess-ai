@@ -34,6 +34,12 @@ func main() {
 func runSelfPlay(numGames int, dbPath string) {
 	fmt.Println("=== Режим самообучения шахматной нейросети ===")
 
+	// Валидация параметров
+	if numGames <= 0 {
+		fmt.Printf("Ошибка: количество игр должно быть больше нуля (указано: %d)\n", numGames)
+		os.Exit(1)
+	}
+
 	// Создаем соединение с базой данных
 	db, err := database.NewDatabase(dbPath)
 	if err != nil {

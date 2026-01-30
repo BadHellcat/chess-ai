@@ -312,40 +312,60 @@ func (w *WebUI) handleSelfPlayStart(rw http.ResponseWriter, r *http.Request) {
 	}
 	
 	w.selfPlayRunning = true
-	w.selfPlayStop = make(chan bool)
+	// Close old channel if exists and create new one
+	if w.selfPlayStop != nil {
+		close(w.selfPlayStop)
+	}
+	w.selfPlayStop = make(chan bool, 1) // Buffered to prevent blocking
 	w.mutex.Unlock()
 	
 	// Запускаем самообучение в отдельной горутине
 	go w.runSelfPlay()
 	
 	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(map[string]bool{"success": true})
+	if err := json.NewEncoder(rw).Encode(map[string]bool{"success": true}); err != nil {
+		http.Error(rw, "Failed to encode response", http.StatusInternalServerError)
+	}
 }
 
 // handleSelfPlayStop останавливает режим самообучения
 func (w *WebUI) handleSelfPlayStop(rw http.ResponseWriter, r *http.Request) {
 	w.mutex.Lock()
-	defer w.mutex.Unlock()
 	
 	if !w.selfPlayRunning {
+		w.mutex.Unlock()
 		http.Error(rw, "Self-play is not running", http.StatusBadRequest)
 		return
 	}
 	
-	w.selfPlayStop <- true
 	w.selfPlayRunning = false
+	stopChan := w.selfPlayStop
+	w.mutex.Unlock()
+	
+	// Send stop signal without holding mutex to avoid deadlock
+	if stopChan != nil {
+		select {
+		case stopChan <- true:
+		default:
+		}
+	}
 	
 	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(map[string]bool{"success": true})
+	if err := json.NewEncoder(rw).Encode(map[string]bool{"success": true}); err != nil {
+		http.Error(rw, "Failed to encode response", http.StatusInternalServerError)
+	}
 }
 
 // handleSelfPlayStatus возвращает статус самообучения
 func (w *WebUI) handleSelfPlayStatus(rw http.ResponseWriter, r *http.Request) {
 	w.mutex.Lock()
-	defer w.mutex.Unlock()
+	running := w.selfPlayRunning
+	w.mutex.Unlock()
 	
 	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(map[string]bool{"running": w.selfPlayRunning})
+	if err := json.NewEncoder(rw).Encode(map[string]bool{"running": running}); err != nil {
+		http.Error(rw, "Failed to encode response", http.StatusInternalServerError)
+	}
 }
 
 // runSelfPlay запускает процесс самообучения
@@ -415,8 +435,8 @@ func (w *WebUI) runSelfPlay() {
 					w.board.MakeMove(move)
 					w.mutex.Unlock()
 					
-					// Небольшая пауза для визуализации
-					time.Sleep(500 * time.Millisecond)
+					// Небольшая пауза для визуализации (100ms)
+					time.Sleep(100 * time.Millisecond)
 				}
 			}
 			

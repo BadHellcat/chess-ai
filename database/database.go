@@ -181,6 +181,11 @@ func (d *Database) GetPositionStats(boardHash string) (*PositionStats, error) {
 
 // GetSimilarMoves возвращает похожие ходы из базы данных
 func (d *Database) GetSimilarMoves(boardHash string, limit int) ([]MoveRecord, error) {
+	// Валидация параметра limit
+	if limit <= 0 || limit > 1000 {
+		return nil, fmt.Errorf("limit must be between 1 and 1000, got: %d", limit)
+	}
+	
 	rows, err := d.db.Query(`
 		SELECT id, game_id, move_number, from_row, from_col, to_row, to_col, evaluation, result, board_hash, created_at
 		FROM moves
