@@ -3,23 +3,59 @@ package main
 import (
 	"bufio"
 	"chess-ai/agent"
+	"chess-ai/database"
 	"chess-ai/game"
+	"chess-ai/selfplay"
 	"chess-ai/stats"
 	"chess-ai/ui"
+	"flag"
 	"fmt"
 	"os"
 	"strings"
 )
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--terminal" {
-		runTerminal()
+	// Определяем флаги командной строки
+	terminalMode := flag.Bool("terminal", false, "Запустить в терминальном режиме")
+	selfPlayMode := flag.Bool("self-play", false, "Режим самообучения (AI играет сам с собой)")
+	numGames := flag.Int("games", 100, "Количество игр для самообучения")
+	dbPath := flag.String("db", "data/chess.db", "Путь к базе данных SQLite")
+	flag.Parse()
+
+	if *selfPlayMode {
+		runSelfPlay(*numGames, *dbPath)
+	} else if *terminalMode {
+		runTerminal(*dbPath)
 	} else {
-		runWeb()
+		runWeb(*dbPath)
 	}
 }
 
-func runWeb() {
+func runSelfPlay(numGames int, dbPath string) {
+	fmt.Println("=== Режим самообучения шахматной нейросети ===")
+
+	// Создаем соединение с базой данных
+	db, err := database.NewDatabase(dbPath)
+	if err != nil {
+		fmt.Printf("Ошибка при создании базы данных: %v\n", err)
+		os.Exit(1)
+	}
+	defer db.Close()
+
+	// Создаем менеджер самообучения
+	manager := selfplay.NewSelfPlayManager(db)
+
+	// Запускаем обучение
+	err = manager.Train(numGames, true)
+	if err != nil {
+		fmt.Printf("Ошибка во время обучения: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("\nОбучение успешно завершено!")
+}
+
+func runWeb(dbPath string) {
 	fmt.Println("=== Шахматы с обучающейся нейросетью ===")
 	fmt.Println("Запуск веб-сервера...")
 	fmt.Println("Откройте браузер на http://localhost:8080")
@@ -28,11 +64,21 @@ func runWeb() {
 	ai := agent.NewAgent(game.Black)
 	statistics := stats.NewStatistics()
 
+	// Подключаем базу данных
+	db, err := database.NewDatabase(dbPath)
+	if err != nil {
+		fmt.Printf("Предупреждение: не удалось подключиться к базе данных: %v\n", err)
+	} else {
+		ai.SetDatabase(db, true)
+		defer db.Close()
+		fmt.Println("База данных подключена для анализа ходов")
+	}
+
 	webUI := ui.NewWebUI(board, ai, statistics)
 	webUI.Start(8080)
 }
 
-func runTerminal() {
+func runTerminal(dbPath string) {
 	fmt.Println("=== Шахматы с обучающейся нейросетью ===")
 	fmt.Println("Вы играете белыми (заглавные буквы)")
 	fmt.Println("Введите ход в формате: e2 e4")
@@ -41,6 +87,17 @@ func runTerminal() {
 
 	board := game.NewBoard()
 	ai := agent.NewAgent(game.Black)
+
+	// Подключаем базу данных
+	db, err := database.NewDatabase(dbPath)
+	if err != nil {
+		fmt.Printf("Предупреждение: не удалось подключиться к базе данных: %v\n", err)
+	} else {
+		ai.SetDatabase(db, true)
+		defer db.Close()
+		fmt.Println("База данных подключена для анализа ходов")
+		fmt.Println()
+	}
 
 	scanner := bufio.NewScanner(os.Stdin)
 	gamesPlayed := 0

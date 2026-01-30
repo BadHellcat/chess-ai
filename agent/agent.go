@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"chess-ai/database"
 	"chess-ai/game"
 	"chess-ai/neural"
 	"math"
@@ -15,16 +16,25 @@ type Agent struct {
 	Gamma         float64 // Коэффициент дисконтирования
 	StateHistory  [][]float64
 	RewardHistory []float64
+	Database      *database.Database // База данных для анализа ходов
+	UseDatabase   bool               // Использовать ли базу данных при выборе хода
 }
 
 // NewAgent создает нового агента
 func NewAgent(color game.Color) *Agent {
 	return &Agent{
-		Network: neural.NewNetwork(),
-		Color:   color,
-		Epsilon: 0.1,
-		Gamma:   0.99,
+		Network:     neural.NewNetwork(),
+		Color:       color,
+		Epsilon:     0.1,
+		Gamma:       0.99,
+		UseDatabase: false,
 	}
+}
+
+// SetDatabase устанавливает базу данных для агента
+func (a *Agent) SetDatabase(db *database.Database, use bool) {
+	a.Database = db
+	a.UseDatabase = use
 }
 
 // ChooseMove выбирает ход используя epsilon-greedy стратегию
@@ -32,6 +42,20 @@ func (a *Agent) ChooseMove(board *game.Board) game.Move {
 	moves := board.GetLegalMoves()
 	if len(moves) == 0 {
 		return game.Move{}
+	}
+
+	// Если включена база данных, пробуем найти лучший ход из истории
+	if a.UseDatabase && a.Database != nil {
+		boardHash := database.GenerateBoardHash(board)
+		stats, err := a.Database.GetPositionStats(boardHash)
+		if err == nil && stats.BestMove != nil && stats.TotalGames >= 5 {
+			// Если есть статистика с достаточным количеством игр, используем лучший ход
+			for _, move := range moves {
+				if move.From == stats.BestMove.From && move.To == stats.BestMove.To {
+					return move
+				}
+			}
+		}
 	}
 
 	// Epsilon-greedy: случайный ход с вероятностью epsilon
