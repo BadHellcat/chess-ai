@@ -524,7 +524,6 @@ const htmlPage = `<!DOCTYPE html>
                     cell.ondragstart = (e) => handleDragStart(e, row, col);
                     cell.ondragover = (e) => e.preventDefault();
                     cell.ondrop = (e) => handleDrop(e, row, col);
-                    cell.draggable = true;
                     board.appendChild(cell);
                 }
             }
@@ -606,8 +605,10 @@ const htmlPage = `<!DOCTYPE html>
                 
                 if (piece.piece && piece.color) {
                     cell.textContent = pieceSymbols[piece.color][piece.piece];
+                    cell.draggable = true;
                 } else {
                     cell.textContent = '';
+                    cell.draggable = false;
                 }
                 
                 if (selectedCell && selectedCell.row === row && selectedCell.col === col) {
