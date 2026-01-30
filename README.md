@@ -3,6 +3,8 @@
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-success)](go.mod)
+[![CI](https://github.com/BadHellcat/chess-ai/workflows/CI/badge.svg)](https://github.com/BadHellcat/chess-ai/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/BadHellcat/chess-ai)](https://goreportcard.com/report/github.com/BadHellcat/chess-ai)
 
 Полнофункциональная шахматная игра с самообучающейся нейронной сетью на чистом Go без использования внешних библиотек.
 
@@ -96,6 +98,8 @@ make coverage      # Тесты с покрытием
 - ✅ Тестирование на Go 1.21 и 1.22
 - ✅ Проверка форматирования и линтинг кода
 - ✅ Сборка бинарного файла
+
+📚 **Подробная документация по тестированию**: см. [TESTING.md](TESTING.md)
 
 ## 📖 Использование
 
