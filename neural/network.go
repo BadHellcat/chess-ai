@@ -84,12 +84,12 @@ func NewNetwork() *Network {
 	initialMomentum := n.Momentum
 	
 	if err := n.Load(); err == nil {
-		// Если загрузка успешна, проверяем и восстанавливаем LearningRate и Momentum
+		// Если загрузка успешна, проверяем и восстанавливаем LearningRate и Momentum,
 		// если они были обнулены или имеют неразумные значения
 		if n.LearningRate <= 0 || n.LearningRate > 1.0 {
 			n.LearningRate = initialLR
 		}
-		if n.Momentum < 0 || n.Momentum > 1.0 {
+		if n.Momentum <= 0 || n.Momentum > 1.0 {
 			n.Momentum = initialMomentum
 		}
 	}
