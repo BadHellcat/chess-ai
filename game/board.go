@@ -49,6 +49,7 @@ type Board struct {
 	CurrentTurn     Color
 	GameOver        bool
 	Winner          Color
+	IsCheck         bool      // Находится ли текущий игрок под шахом
 	EnPassantTarget *Position // Позиция для взятия на проходе
 	WhiteKingMoved  bool
 	BlackKingMoved  bool
@@ -122,22 +123,30 @@ func (b *Board) IsValidMove(move Move) bool {
 	}
 
 	// Проверка правил движения для каждой фигуры
+	var validMove bool
 	switch piece.Type {
 	case Pawn:
-		return b.isValidPawnMove(move, piece)
+		validMove = b.isValidPawnMove(move, piece)
 	case Knight:
-		return b.isValidKnightMove(move)
+		validMove = b.isValidKnightMove(move)
 	case Bishop:
-		return b.isValidBishopMove(move)
+		validMove = b.isValidBishopMove(move)
 	case Rook:
-		return b.isValidRookMove(move)
+		validMove = b.isValidRookMove(move)
 	case Queen:
-		return b.isValidQueenMove(move)
+		validMove = b.isValidQueenMove(move)
 	case King:
-		return b.isValidKingMove(move, piece)
+		validMove = b.isValidKingMove(move, piece)
+	default:
+		return false
 	}
 
-	return false
+	if !validMove {
+		return false
+	}
+
+	// Проверяем, не оставляет ли ход короля под шахом
+	return !b.wouldBeInCheck(move, piece.Color)
 }
 
 // isValidPawnMove проверяет ход пешки (включая взятие на проходе)
@@ -287,8 +296,30 @@ func (b *Board) canCastle(move Move, piece Piece) bool {
 		}
 	}
 
-	// Король не должен быть под шахом (упрощенная проверка)
-	// В полной реализации нужно проверить все три клетки
+	// Король не должен быть под шахом, проходить через шах или попадать под шах
+	opponentColor := Black
+	if piece.Color == Black {
+		opponentColor = White
+	}
+
+	// Проверяем начальную позицию короля
+	if b.isSquareUnderAttack(move.From, opponentColor) {
+		return false
+	}
+
+	// Проверяем промежуточные клетки, через которые проходит король
+	step := 1
+	if move.To.Col < move.From.Col {
+		step = -1
+	}
+
+	for col := move.From.Col + step; col != move.To.Col+step; col += step {
+		pos := Position{Row: move.From.Row, Col: col}
+		if b.isSquareUnderAttack(pos, opponentColor) {
+			return false
+		}
+	}
+
 	return true
 }
 
@@ -403,6 +434,9 @@ func (b *Board) MakeMove(move Move) {
 
 	b.MovesCount++
 
+	// Проверяем, находится ли текущий игрок под шахом
+	b.IsCheck = b.isInCheck(b.CurrentTurn)
+
 	// Проверяем окончание игры
 	b.checkGameOver()
 }
@@ -437,15 +471,128 @@ func (b *Board) GetLegalMoves() []Move {
 	return moves
 }
 
+// findKing находит позицию короля указанного цвета
+func (b *Board) findKing(color Color) Position {
+	for row := 0; row < 8; row++ {
+		for col := 0; col < 8; col++ {
+			piece := b.Cells[row][col]
+			if piece.Type == King && piece.Color == color {
+				return Position{Row: row, Col: col}
+			}
+		}
+	}
+	// Не должно происходить в корректной игре
+	return Position{Row: -1, Col: -1}
+}
+
+// isSquareUnderAttack проверяет, атакована ли клетка фигурами указанного цвета
+func (b *Board) isSquareUnderAttack(pos Position, byColor Color) bool {
+	// Проверяем все фигуры атакующего цвета
+	for row := 0; row < 8; row++ {
+		for col := 0; col < 8; col++ {
+			piece := b.Cells[row][col]
+			if piece.Type == Empty || piece.Color != byColor {
+				continue
+			}
+
+			from := Position{Row: row, Col: col}
+			move := Move{From: from, To: pos}
+
+			// Для пешки проверяем только диагональные атаки
+			if piece.Type == Pawn {
+				direction := -1
+				if piece.Color == Black {
+					direction = 1
+				}
+				rowDiff := pos.Row - from.Row
+				colDiff := abs(pos.Col - from.Col)
+
+				if rowDiff == direction && colDiff == 1 {
+					return true
+				}
+				continue
+			}
+
+			// Для других фигур проверяем базовую валидность хода
+			// (без учета проверки на шах, чтобы избежать рекурсии)
+			switch piece.Type {
+			case Knight:
+				if b.isValidKnightMove(move) {
+					return true
+				}
+			case Bishop:
+				if b.isValidBishopMove(move) {
+					return true
+				}
+			case Rook:
+				if b.isValidRookMove(move) {
+					return true
+				}
+			case Queen:
+				if b.isValidQueenMove(move) {
+					return true
+				}
+			case King:
+				rowDiff := abs(pos.Row - from.Row)
+				colDiff := abs(pos.Col - from.Col)
+				if rowDiff <= 1 && colDiff <= 1 {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+// isInCheck проверяет, находится ли король указанного цвета под шахом
+func (b *Board) isInCheck(color Color) bool {
+	kingPos := b.findKing(color)
+	if kingPos.Row == -1 {
+		return false
+	}
+
+	// Определяем цвет противника
+	opponentColor := Black
+	if color == Black {
+		opponentColor = White
+	}
+
+	return b.isSquareUnderAttack(kingPos, opponentColor)
+}
+
+// wouldBeInCheck проверяет, будет ли король под шахом после хода
+func (b *Board) wouldBeInCheck(move Move, color Color) bool {
+	// Создаём временную копию доски
+	tempBoard := b.Clone()
+
+	// Выполняем ход на временной доске
+	piece := tempBoard.Cells[move.From.Row][move.From.Col]
+	tempBoard.Cells[move.To.Row][move.To.Col] = piece
+	tempBoard.Cells[move.From.Row][move.From.Col] = Piece{Empty, White}
+
+	// Проверяем, под шахом ли король
+	return tempBoard.isInCheck(color)
+}
+
 // checkGameOver проверяет окончание игры
 func (b *Board) checkGameOver() {
 	moves := b.GetLegalMoves()
 	
 	if len(moves) == 0 {
 		b.GameOver = true
-		// Упрощенная логика: если нет ходов - ничья
-		// В полной реализации нужно проверить шах
-		b.Winner = White // Ничья обозначается как отсутствие победителя
+		// Проверяем, находится ли король под шахом
+		if b.isInCheck(b.CurrentTurn) {
+			// Мат - противоположная сторона выигрывает
+			if b.CurrentTurn == White {
+				b.Winner = Black
+			} else {
+				b.Winner = White
+			}
+		} else {
+			// Пат - ничья (используем White как индикатор ничьей)
+			b.Winner = White
+		}
 	}
 
 	// Проверка на ничью по количеству ходов (упрощенная)
@@ -462,6 +609,7 @@ func (b *Board) Clone() *Board {
 		CurrentTurn:     b.CurrentTurn,
 		GameOver:        b.GameOver,
 		Winner:          b.Winner,
+		IsCheck:         b.IsCheck,
 		WhiteKingMoved:  b.WhiteKingMoved,
 		BlackKingMoved:  b.BlackKingMoved,
 		WhiteRookAMoved: b.WhiteRookAMoved,

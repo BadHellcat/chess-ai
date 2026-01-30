@@ -60,6 +60,7 @@ type BoardState struct {
 	CurrentTurn string          `json:"currentTurn"`
 	GameOver    bool            `json:"gameOver"`
 	Winner      string          `json:"winner"`
+	IsCheck     bool            `json:"isCheck"`
 }
 
 // CellState представляет состояние клетки
@@ -77,6 +78,7 @@ func (w *WebUI) handleState(rw http.ResponseWriter, r *http.Request) {
 		CurrentTurn: colorToString(w.board.CurrentTurn),
 		GameOver:    w.board.GameOver,
 		Winner:      colorToString(w.board.Winner),
+		IsCheck:     w.board.IsCheck,
 	}
 
 	for row := 0; row < 8; row++ {
@@ -628,7 +630,11 @@ const htmlPage = `<!DOCTYPE html>
                     statusBar.textContent = '🤝 Draw!';
                 }
             } else {
-                statusBar.textContent = (boardState.currentTurn === 'white' ? 'White' : 'Black') + "'s Turn";
+                let turnText = (boardState.currentTurn === 'white' ? 'White' : 'Black') + "'s Turn";
+                if (boardState.isCheck) {
+                    turnText += ' - ♔ Check!';
+                }
+                statusBar.textContent = turnText;
             }
         }
         
