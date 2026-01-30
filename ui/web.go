@@ -61,6 +61,8 @@ type BoardState struct {
 	GameOver    bool            `json:"gameOver"`
 	Winner      string          `json:"winner"`
 	IsCheck     bool            `json:"isCheck"`
+	Epsilon     float64         `json:"epsilon"`
+	MovesCount  int             `json:"movesCount"`
 }
 
 // CellState представляет состояние клетки
@@ -84,6 +86,8 @@ func (w *WebUI) writeState(rw http.ResponseWriter) {
 		GameOver:    w.board.GameOver,
 		Winner:      colorToString(w.board.Winner),
 		IsCheck:     w.board.IsCheck,
+		Epsilon:     w.agent.Epsilon,
+		MovesCount:  w.board.MovesCount,
 	}
 
 	for row := 0; row < 8; row++ {
@@ -139,6 +143,9 @@ func (w *WebUI) handleMove(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Record state before player's move (for AI to learn from the game)
+	w.agent.RecordState(w.board)
+	
 	w.board.MakeMove(move)
 
 	// Capture state before releasing mutex
@@ -153,14 +160,34 @@ func (w *WebUI) handleMove(rw http.ResponseWriter, r *http.Request) {
 	// Handle game over for player's winning move synchronously
 	if gameOver {
 		w.mutex.Lock()
+		
+		// Determine reward for AI learning
+		var reward float64
+		if w.board.Winner == w.agent.Color {
+			reward = 1.0 // AI won
+		} else if w.board.Winner != w.agent.Color && w.board.Winner != game.White && w.board.Winner != game.Black {
+			reward = 0.5 // Draw
+		} else {
+			reward = 0.0 // AI lost
+		}
+		
+		// Train the AI
+		w.agent.Learn(reward)
+		w.agent.Save()
+		
 		gameNumber := len(w.statistics.GetStats()) + 1
 		result := stats.GameResult{
 			GameNumber: gameNumber,
 			Winner:     colorToString(w.board.Winner),
 			Epsilon:    w.agent.Epsilon,
-			MovesCount: 0,
+			MovesCount: w.board.MovesCount,
 		}
 		w.statistics.AddGame(result)
+		
+		// Reset state history for next game
+		w.agent.StateHistory = nil
+		w.agent.RewardHistory = nil
+		
 		w.mutex.Unlock()
 		return
 	}
@@ -172,6 +199,9 @@ func (w *WebUI) handleMove(rw http.ResponseWriter, r *http.Request) {
 			w.mutex.Lock()
 			boardClone := w.board.Clone()
 			w.mutex.Unlock()
+			
+			// Record state before making move
+			w.agent.RecordState(boardClone)
 
 			// Compute AI move without holding mutex (can take 10+ seconds)
 			aiMove := w.agent.ChooseMove(boardClone)
@@ -185,14 +215,32 @@ func (w *WebUI) handleMove(rw http.ResponseWriter, r *http.Request) {
 				w.board.MakeMove(aiMove)
 
 				if w.board.GameOver {
+					// Determine reward for AI learning
+					var reward float64
+					if w.board.Winner == w.agent.Color {
+						reward = 1.0 // AI won
+					} else if w.board.Winner != w.agent.Color && w.board.Winner != game.White && w.board.Winner != game.Black {
+						reward = 0.5 // Draw
+					} else {
+						reward = 0.0 // AI lost
+					}
+					
+					// Train the AI
+					w.agent.Learn(reward)
+					w.agent.Save()
+					
 					gameNumber := len(w.statistics.GetStats()) + 1
 					result := stats.GameResult{
 						GameNumber: gameNumber,
 						Winner:     colorToString(w.board.Winner),
 						Epsilon:    w.agent.Epsilon,
-						MovesCount: 0,
+						MovesCount: w.board.MovesCount,
 					}
 					w.statistics.AddGame(result)
+					
+					// Reset state history for next game
+					w.agent.StateHistory = nil
+					w.agent.RewardHistory = nil
 				}
 			}
 		}()
@@ -519,6 +567,18 @@ const htmlPage = `<!DOCTYPE html>
                         <span class="stat-value" id="winRate">0%</span>
                     </div>
                 </div>
+                
+                <div class="stats-section">
+                    <h3>🧠 AI Training Info</h3>
+                    <div class="stat-item">
+                        <span class="stat-label">Current Epsilon:</span>
+                        <span class="stat-value" id="currentEpsilon">-</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Moves This Game:</span>
+                        <span class="stat-value" id="movesCount">0</span>
+                    </div>
+                </div>
             </div>
             
             <div class="center-panel">
@@ -633,6 +693,7 @@ const htmlPage = `<!DOCTYPE html>
                 boardState = await response.json();
                 updateBoard();
                 updateStatus();
+                updateStats(); // Update stats to show current epsilon and move count
             } catch (error) {
                 console.error('Error loading state:', error);
             }
@@ -681,6 +742,10 @@ const htmlPage = `<!DOCTYPE html>
                 if (boardState.isCheck) {
                     turnText += ' - ♔ Check!';
                 }
+                // Add AI thinking indicator
+                if (boardState.currentTurn === 'black') {
+                    turnText += ' 🤔 AI is thinking...';
+                }
                 statusBar.textContent = turnText;
             }
         }
@@ -725,6 +790,12 @@ const htmlPage = `<!DOCTYPE html>
             document.getElementById('playerWins').textContent = playerWins;
             document.getElementById('draws').textContent = draws;
             document.getElementById('winRate').textContent = winRate + '%';
+            
+            // Update current epsilon and moves count from board state
+            if (boardState) {
+                document.getElementById('currentEpsilon').textContent = boardState.epsilon.toFixed(4);
+                document.getElementById('movesCount').textContent = boardState.movesCount;
+            }
         }
         
         function drawChart() {
@@ -887,12 +958,20 @@ const htmlPage = `<!DOCTYPE html>
         loadState();
         loadStats();
         
-        // Refresh stats every 2 seconds
-        setInterval(() => {
-            if (boardState && boardState.gameOver) {
-                loadStats();
+        // Poll for state changes (AI moves and game updates)
+        setInterval(async () => {
+            if (boardState) {
+                const prevTurn = boardState.currentTurn;
+                const prevGameOver = boardState.gameOver;
+                
+                await loadState();
+                
+                // If turn changed or game ended, reload stats
+                if (boardState.currentTurn !== prevTurn || boardState.gameOver !== prevGameOver) {
+                    await loadStats();
+                }
             }
-        }, 2000);
+        }, 500); // Poll every 500ms for responsive UI
     </script>
 </body>
 </html>`
