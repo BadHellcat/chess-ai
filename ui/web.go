@@ -143,9 +143,6 @@ func (w *WebUI) handleMove(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Record state before player's move (for AI to learn from the game)
-	w.agent.RecordState(w.board)
-	
 	w.board.MakeMove(move)
 
 	// Capture state before releasing mutex
@@ -155,42 +152,15 @@ func (w *WebUI) handleMove(rw http.ResponseWriter, r *http.Request) {
 
 	// Send response immediately after player's move
 	w.writeState(rw)
-	w.mutex.Unlock()
-
-	// Handle game over for player's winning move synchronously
+	
+	// Handle game over for player's winning move synchronously (with mutex held)
 	if gameOver {
-		w.mutex.Lock()
-		
-		// Determine reward for AI learning
-		var reward float64
-		if w.board.Winner == w.agent.Color {
-			reward = 1.0 // AI won
-		} else if w.board.Winner != w.agent.Color && w.board.Winner != game.White && w.board.Winner != game.Black {
-			reward = 0.5 // Draw
-		} else {
-			reward = 0.0 // AI lost
-		}
-		
-		// Train the AI
-		w.agent.Learn(reward)
-		w.agent.Save()
-		
-		gameNumber := len(w.statistics.GetStats()) + 1
-		result := stats.GameResult{
-			GameNumber: gameNumber,
-			Winner:     colorToString(w.board.Winner),
-			Epsilon:    w.agent.Epsilon,
-			MovesCount: w.board.MovesCount,
-		}
-		w.statistics.AddGame(result)
-		
-		// Reset state history for next game
-		w.agent.StateHistory = nil
-		w.agent.RewardHistory = nil
-		
+		w.handleGameEnd()
 		w.mutex.Unlock()
 		return
 	}
+	
+	w.mutex.Unlock()
 
 	// Process AI move asynchronously if it's AI's turn
 	if !gameOver && currentTurn == aiColor {
@@ -198,10 +168,10 @@ func (w *WebUI) handleMove(rw http.ResponseWriter, r *http.Request) {
 			// Clone board for AI computation
 			w.mutex.Lock()
 			boardClone := w.board.Clone()
-			w.mutex.Unlock()
 			
-			// Record state before making move
+			// Record state before making move (with mutex held)
 			w.agent.RecordState(boardClone)
+			w.mutex.Unlock()
 
 			// Compute AI move without holding mutex (can take 10+ seconds)
 			aiMove := w.agent.ChooseMove(boardClone)
@@ -215,36 +185,52 @@ func (w *WebUI) handleMove(rw http.ResponseWriter, r *http.Request) {
 				w.board.MakeMove(aiMove)
 
 				if w.board.GameOver {
-					// Determine reward for AI learning
-					var reward float64
-					if w.board.Winner == w.agent.Color {
-						reward = 1.0 // AI won
-					} else if w.board.Winner != w.agent.Color && w.board.Winner != game.White && w.board.Winner != game.Black {
-						reward = 0.5 // Draw
-					} else {
-						reward = 0.0 // AI lost
-					}
-					
-					// Train the AI
-					w.agent.Learn(reward)
-					w.agent.Save()
-					
-					gameNumber := len(w.statistics.GetStats()) + 1
-					result := stats.GameResult{
-						GameNumber: gameNumber,
-						Winner:     colorToString(w.board.Winner),
-						Epsilon:    w.agent.Epsilon,
-						MovesCount: w.board.MovesCount,
-					}
-					w.statistics.AddGame(result)
-					
-					// Reset state history for next game
-					w.agent.StateHistory = nil
-					w.agent.RewardHistory = nil
+					w.handleGameEnd()
 				}
 			}
 		}()
 	}
+}
+
+// handleGameEnd handles the end of game, learning and statistics (must be called with mutex held)
+func (w *WebUI) handleGameEnd() {
+	var reward float64
+	
+	// Determine if it's a draw: game is over and no checkmate occurred
+	// In board.go, draws set Winner to White (stalemate or move limit)
+	isDraw := w.board.GameOver && !w.board.IsCheck
+	
+	if isDraw {
+		reward = 0.5 // Draw
+	} else if w.board.Winner == w.agent.Color {
+		reward = 1.0 // AI won
+	} else {
+		reward = 0.0 // AI lost
+	}
+	
+	// Train the AI
+	w.agent.Learn(reward)
+	w.agent.Save()
+	
+	gameNumber := len(w.statistics.GetStats()) + 1
+	
+	// Determine winner string for stats
+	winnerStr := "draw"
+	if !isDraw {
+		winnerStr = colorToString(w.board.Winner)
+	}
+	
+	result := stats.GameResult{
+		GameNumber: gameNumber,
+		Winner:     winnerStr,
+		Epsilon:    w.agent.Epsilon,
+		MovesCount: w.board.MovesCount,
+	}
+	w.statistics.AddGame(result)
+	
+	// Reset state history for next game
+	w.agent.StateHistory = nil
+	w.agent.RewardHistory = nil
 }
 
 // handleReset сбрасывает игру
@@ -793,8 +779,10 @@ const htmlPage = `<!DOCTYPE html>
             
             // Update current epsilon and moves count from board state
             if (boardState) {
-                document.getElementById('currentEpsilon').textContent = boardState.epsilon.toFixed(4);
-                document.getElementById('movesCount').textContent = boardState.movesCount;
+                const epsilon = boardState.epsilon !== undefined ? boardState.epsilon.toFixed(4) : '-';
+                const moves = boardState.movesCount !== undefined ? boardState.movesCount : 0;
+                document.getElementById('currentEpsilon').textContent = epsilon;
+                document.getElementById('movesCount').textContent = moves;
             }
         }
         
@@ -960,16 +948,20 @@ const htmlPage = `<!DOCTYPE html>
         
         // Poll for state changes (AI moves and game updates)
         setInterval(async () => {
-            if (boardState) {
-                const prevTurn = boardState.currentTurn;
-                const prevGameOver = boardState.gameOver;
-                
-                await loadState();
-                
-                // If turn changed or game ended, reload stats
-                if (boardState.currentTurn !== prevTurn || boardState.gameOver !== prevGameOver) {
-                    await loadStats();
+            try {
+                if (boardState) {
+                    const prevTurn = boardState.currentTurn;
+                    const prevGameOver = boardState.gameOver;
+                    
+                    await loadState();
+                    
+                    // If turn changed or game ended, reload stats
+                    if (boardState && (boardState.currentTurn !== prevTurn || boardState.gameOver !== prevGameOver)) {
+                        await loadStats();
+                    }
                 }
+            } catch (error) {
+                console.error('Error polling state:', error);
             }
         }, 500); // Poll every 500ms for responsive UI
     </script>
