@@ -8,15 +8,21 @@ chess-ai.exe
 
 # Neural network weights
 neural/weights.gob
+neural/neural/
 
 # Statistics
 stats/games.json
+stats/stats/
 
 # Test binary
 *.test
 
 # Output
 *.out
+
+# Coverage
+coverage.out
+coverage.html
 
 # Go workspace
 go.work
