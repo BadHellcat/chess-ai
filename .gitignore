@@ -12,6 +12,10 @@ neural/weights.gob
 # Statistics
 stats/games.json
 
+# Database
+data/
+*.db
+
 # Test binary
 *.test
 

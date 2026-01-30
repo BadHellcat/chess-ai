@@ -17,14 +17,24 @@ type WebUI struct {
 	agent      *agent.Agent
 	statistics *stats.Statistics
 	mutex      sync.Mutex
+	
+	// Для режима самообучения
+	selfPlayRunning bool
+	selfPlayStop    chan bool
+	whiteAgent      *agent.Agent
+	blackAgent      *agent.Agent
 }
 
 // NewWebUI создает новый веб-интерфейс
-func NewWebUI(board *game.Board, agent *agent.Agent, statistics *stats.Statistics) *WebUI {
+func NewWebUI(board *game.Board, agentAI *agent.Agent, statistics *stats.Statistics) *WebUI {
 	return &WebUI{
-		board:      board,
-		agent:      agent,
-		statistics: statistics,
+		board:           board,
+		agent:           agentAI,
+		statistics:      statistics,
+		selfPlayRunning: false,
+		selfPlayStop:    make(chan bool),
+		whiteAgent:      agent.NewAgent(game.White),
+		blackAgent:      agent.NewAgent(game.Black),
 	}
 }
 
@@ -35,6 +45,9 @@ func (w *WebUI) Start(port int) error {
 	http.HandleFunc("/api/move", w.handleMove)
 	http.HandleFunc("/api/reset", w.handleReset)
 	http.HandleFunc("/api/stats", w.handleStats)
+	http.HandleFunc("/api/selfplay/start", w.handleSelfPlayStart)
+	http.HandleFunc("/api/selfplay/stop", w.handleSelfPlayStop)
+	http.HandleFunc("/api/selfplay/status", w.handleSelfPlayStatus)
 
 	addr := fmt.Sprintf(":%d", port)
 	fmt.Printf("Starting web server on http://localhost%s\n", addr)
@@ -288,6 +301,151 @@ func (w *WebUI) handleStats(rw http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// handleSelfPlayStart запускает режим самообучения
+func (w *WebUI) handleSelfPlayStart(rw http.ResponseWriter, r *http.Request) {
+	w.mutex.Lock()
+	
+	if w.selfPlayRunning {
+		w.mutex.Unlock()
+		http.Error(rw, "Self-play is already running", http.StatusBadRequest)
+		return
+	}
+	
+	w.selfPlayRunning = true
+	// Close old channel if exists and create new one
+	if w.selfPlayStop != nil {
+		close(w.selfPlayStop)
+	}
+	w.selfPlayStop = make(chan bool, 1) // Buffered to prevent blocking
+	w.mutex.Unlock()
+	
+	// Запускаем самообучение в отдельной горутине
+	go w.runSelfPlay()
+	
+	rw.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(rw).Encode(map[string]bool{"success": true}); err != nil {
+		http.Error(rw, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+// handleSelfPlayStop останавливает режим самообучения
+func (w *WebUI) handleSelfPlayStop(rw http.ResponseWriter, r *http.Request) {
+	w.mutex.Lock()
+	
+	if !w.selfPlayRunning {
+		w.mutex.Unlock()
+		http.Error(rw, "Self-play is not running", http.StatusBadRequest)
+		return
+	}
+	
+	w.selfPlayRunning = false
+	stopChan := w.selfPlayStop
+	w.mutex.Unlock()
+	
+	// Send stop signal without holding mutex to avoid deadlock
+	if stopChan != nil {
+		select {
+		case stopChan <- true:
+		default:
+		}
+	}
+	
+	rw.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(rw).Encode(map[string]bool{"success": true}); err != nil {
+		http.Error(rw, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+// handleSelfPlayStatus возвращает статус самообучения
+func (w *WebUI) handleSelfPlayStatus(rw http.ResponseWriter, r *http.Request) {
+	w.mutex.Lock()
+	running := w.selfPlayRunning
+	w.mutex.Unlock()
+	
+	rw.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(rw).Encode(map[string]bool{"running": running}); err != nil {
+		http.Error(rw, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+// runSelfPlay запускает процесс самообучения
+func (w *WebUI) runSelfPlay() {
+	for {
+		select {
+		case <-w.selfPlayStop:
+			return
+		default:
+			w.mutex.Lock()
+			// Сбрасываем доску для новой игры
+			w.board = game.NewBoard()
+			w.whiteAgent.StateHistory = nil
+			w.blackAgent.StateHistory = nil
+			w.mutex.Unlock()
+			
+			// Играем одну игру
+			for {
+				select {
+				case <-w.selfPlayStop:
+					return
+				default:
+					w.mutex.Lock()
+					
+					if w.board.GameOver {
+						// Обучаем агентов
+						var whiteReward, blackReward float64
+						if w.board.Winner == game.White {
+							whiteReward = 1.0
+							blackReward = 0.0
+						} else if w.board.Winner == game.Black {
+							whiteReward = 0.0
+							blackReward = 1.0
+						} else {
+							whiteReward = 0.5
+							blackReward = 0.5
+						}
+						
+						w.whiteAgent.Learn(whiteReward)
+						w.blackAgent.Learn(blackReward)
+						w.whiteAgent.Save()
+						w.blackAgent.Save()
+						
+						w.mutex.Unlock()
+						break
+					}
+					
+					// Выбираем текущего агента
+					var currentAgent *agent.Agent
+					if w.board.CurrentTurn == game.White {
+						currentAgent = w.whiteAgent
+					} else {
+						currentAgent = w.blackAgent
+					}
+					
+					// Записываем состояние
+					currentAgent.RecordState(w.board)
+					
+					// Выбираем ход
+					move := currentAgent.ChooseMove(w.board)
+					if move.From.Row == -1 {
+						w.mutex.Unlock()
+						break
+					}
+					
+					// Делаем ход
+					w.board.MakeMove(move)
+					w.mutex.Unlock()
+					
+					// Небольшая пауза для визуализации (100ms)
+					time.Sleep(100 * time.Millisecond)
+				}
+			}
+			
+			// Пауза между играми
+			time.Sleep(1 * time.Second)
+		}
+	}
+}
+
 // Вспомогательные функции
 func colorToString(c game.Color) string {
 	if c == game.White {
@@ -528,6 +686,18 @@ const htmlPage = `<!DOCTYPE html>
                 <div class="controls">
                     <button class="primary" onclick="resetGame()">🔄 New Game</button>
                     <button class="secondary" onclick="resetGame()">♻️ Reset</button>
+                </div>
+                
+                <div class="stats-section">
+                    <h3>🤖 Self-Play Mode</h3>
+                    <div class="controls">
+                        <button class="primary" id="startSelfPlay" onclick="startSelfPlay()">▶️ Start Training</button>
+                        <button class="secondary" id="stopSelfPlay" onclick="stopSelfPlay()" style="display: none;">⏸️ Stop Training</button>
+                    </div>
+                    <div class="stat-item" style="margin-top: 10px;">
+                        <span class="stat-label">Training Status:</span>
+                        <span class="stat-value" id="selfPlayStatus">Stopped</span>
+                    </div>
                 </div>
                 
                 <div class="stats-section">
@@ -786,6 +956,54 @@ const htmlPage = `<!DOCTYPE html>
             }
         }
         
+        async function startSelfPlay() {
+            try {
+                const response = await fetch('/api/selfplay/start', { method: 'POST' });
+                if (response.ok) {
+                    document.getElementById('startSelfPlay').style.display = 'none';
+                    document.getElementById('stopSelfPlay').style.display = 'block';
+                    document.getElementById('selfPlayStatus').textContent = 'Running';
+                    document.getElementById('selfPlayStatus').style.color = '#4CAF50';
+                }
+            } catch (error) {
+                console.error('Error starting self-play:', error);
+            }
+        }
+        
+        async function stopSelfPlay() {
+            try {
+                const response = await fetch('/api/selfplay/stop', { method: 'POST' });
+                if (response.ok) {
+                    document.getElementById('startSelfPlay').style.display = 'block';
+                    document.getElementById('stopSelfPlay').style.display = 'none';
+                    document.getElementById('selfPlayStatus').textContent = 'Stopped';
+                    document.getElementById('selfPlayStatus').style.color = '#F44336';
+                }
+            } catch (error) {
+                console.error('Error stopping self-play:', error);
+            }
+        }
+        
+        async function checkSelfPlayStatus() {
+            try {
+                const response = await fetch('/api/selfplay/status');
+                const status = await response.json();
+                if (status.running) {
+                    document.getElementById('startSelfPlay').style.display = 'none';
+                    document.getElementById('stopSelfPlay').style.display = 'block';
+                    document.getElementById('selfPlayStatus').textContent = 'Running';
+                    document.getElementById('selfPlayStatus').style.color = '#4CAF50';
+                } else {
+                    document.getElementById('startSelfPlay').style.display = 'block';
+                    document.getElementById('stopSelfPlay').style.display = 'none';
+                    document.getElementById('selfPlayStatus').textContent = 'Stopped';
+                    document.getElementById('selfPlayStatus').style.color = '#F44336';
+                }
+            } catch (error) {
+                console.error('Error checking self-play status:', error);
+            }
+        }
+        
         function drawChart() {
             const canvas = document.getElementById('progressChart');
             const ctx = canvas.getContext('2d');
@@ -945,6 +1163,7 @@ const htmlPage = `<!DOCTYPE html>
         createBoard();
         loadState();
         loadStats();
+        checkSelfPlayStatus();
         
         // Poll for state changes (AI moves and game updates)
         setInterval(async () => {
@@ -960,6 +1179,9 @@ const htmlPage = `<!DOCTYPE html>
                         await loadStats();
                     }
                 }
+                
+                // Check self-play status periodically
+                await checkSelfPlayStatus();
             } catch (error) {
                 console.error('Error polling state:', error);
             }
