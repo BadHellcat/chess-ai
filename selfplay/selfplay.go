@@ -21,6 +21,10 @@ func NewSelfPlayManager(db *database.Database) *SelfPlayManager {
 	whiteAgent := agent.NewAgent(game.White)
 	blackAgent := agent.NewAgent(game.Black)
 
+	// Оба агента должны использовать одну и ту же нейросеть
+	// чтобы обучаться на опыте друг друга
+	blackAgent.Network = whiteAgent.Network
+
 	// Настраиваем базу данных для агентов
 	whiteAgent.SetDatabase(db, true)
 	blackAgent.SetDatabase(db, true)
@@ -163,9 +167,14 @@ func (m *SelfPlayManager) PlayGame(verbose bool) error {
 		return fmt.Errorf("ошибка при завершении игры: %v", err)
 	}
 
-	// Обучаем агентов
-	m.whiteAgent.Learn(whiteReward)
-	m.blackAgent.Learn(blackReward)
+	// Обучаем сеть на опыте обоих игроков
+	// Важно: оба агента используют одну сеть, поэтому обучаем её один раз
+	// на опыте обоих игроков, используя правильные награды с их перспектив
+	m.trainSharedNetwork(whiteReward, blackReward)
+
+	// Очищаем историю состояний после обучения
+	m.whiteAgent.StateHistory = nil
+	m.blackAgent.StateHistory = nil
 
 	if verbose {
 		fmt.Printf("=== Игра #%d завершена: %s, ходов: %d ===\n", m.gamesCount, winner, moveNumber)
@@ -233,4 +242,51 @@ func (m *SelfPlayManager) Train(numGames int, verbose bool) error {
 // GetGamesCount возвращает количество сыгранных игр
 func (m *SelfPlayManager) GetGamesCount() int {
 	return m.gamesCount
+}
+
+// trainSharedNetwork обучает общую нейросеть на опыте обоих игроков
+func (m *SelfPlayManager) trainSharedNetwork(whiteReward, blackReward float64) {
+	// Собираем все опыты с правильными наградами
+	type Experience struct {
+		state  []float64
+		reward float64
+	}
+	
+	var allExperiences []Experience
+	
+	// Добавляем опыт белых с дисконтированием
+	whiteRewardDiscounted := whiteReward
+	for i := len(m.whiteAgent.StateHistory) - 1; i >= 0; i-- {
+		allExperiences = append(allExperiences, Experience{
+			state:  m.whiteAgent.StateHistory[i],
+			reward: whiteRewardDiscounted,
+		})
+		whiteRewardDiscounted *= m.whiteAgent.Gamma
+	}
+	
+	// Добавляем опыт черных с дисконтированием
+	blackRewardDiscounted := blackReward
+	for i := len(m.blackAgent.StateHistory) - 1; i >= 0; i-- {
+		allExperiences = append(allExperiences, Experience{
+			state:  m.blackAgent.StateHistory[i],
+			reward: blackRewardDiscounted,
+		})
+		blackRewardDiscounted *= m.blackAgent.Gamma
+	}
+	
+	// Обучаем сеть на всех опытах сразу
+	for _, exp := range allExperiences {
+		m.whiteAgent.Network.Train(exp.state, exp.reward)
+	}
+	
+	// Уменьшаем epsilon для обоих агентов (они должны исследовать меньше со временем)
+	m.whiteAgent.Epsilon *= 0.995
+	if m.whiteAgent.Epsilon < 0.01 {
+		m.whiteAgent.Epsilon = 0.01
+	}
+	
+	m.blackAgent.Epsilon *= 0.995
+	if m.blackAgent.Epsilon < 0.01 {
+		m.blackAgent.Epsilon = 0.01
+	}
 }

@@ -79,7 +79,20 @@ func NewNetwork() *Network {
 	n.VBias3 = make([]float64, 1)
 
 	// Попытка загрузить сохраненные веса
-	n.Load()
+	// Сохраняем начальные значения LearningRate и Momentum
+	initialLR := n.LearningRate
+	initialMomentum := n.Momentum
+	
+	if err := n.Load(); err == nil {
+		// Если загрузка успешна, проверяем и восстанавливаем LearningRate и Momentum,
+		// если они были обнулены или имеют неразумные значения
+		if n.LearningRate <= 0 || n.LearningRate > 1.0 {
+			n.LearningRate = initialLR
+		}
+		if n.Momentum <= 0 || n.Momentum > 1.0 {
+			n.Momentum = initialMomentum
+		}
+	}
 
 	return n
 }
