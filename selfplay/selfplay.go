@@ -21,6 +21,10 @@ func NewSelfPlayManager(db *database.Database) *SelfPlayManager {
 	whiteAgent := agent.NewAgent(game.White)
 	blackAgent := agent.NewAgent(game.Black)
 
+	// Оба агента должны использовать одну и ту же нейросеть
+	// чтобы обучаться на опыте друг друга
+	blackAgent.Network = whiteAgent.Network
+
 	// Настраиваем базу данных для агентов
 	whiteAgent.SetDatabase(db, true)
 	blackAgent.SetDatabase(db, true)
@@ -166,6 +170,10 @@ func (m *SelfPlayManager) PlayGame(verbose bool) error {
 	// Обучаем агентов
 	m.whiteAgent.Learn(whiteReward)
 	m.blackAgent.Learn(blackReward)
+
+	// Очищаем историю состояний после обучения
+	m.whiteAgent.StateHistory = nil
+	m.blackAgent.StateHistory = nil
 
 	if verbose {
 		fmt.Printf("=== Игра #%d завершена: %s, ходов: %d ===\n", m.gamesCount, winner, moveNumber)
