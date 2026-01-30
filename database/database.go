@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 )
@@ -254,7 +256,7 @@ func (d *Database) GetPositionStats(boardHash string) (*PositionStats, error) {
 func (d *Database) GetSimilarMoves(boardHash string, limit int) ([]MoveRecord, error) {
 	// Валидация параметра limit
 	if limit <= 0 || limit > 1000 {
-		return nil, fmt.Errorf("limit must be between 1 and 1000, got: %d", limit)
+		return nil, fmt.Errorf("limit должен быть от 1 до 1000, получено: %d", limit)
 	}
 
 	d.mu.RLock()
@@ -269,15 +271,10 @@ func (d *Database) GetSimilarMoves(boardHash string, limit int) ([]MoveRecord, e
 		}
 	}
 
-	// Сортируем по оценке (DESC) и ограничиваем количество
-	// Простая сортировка пузырьком для небольших наборов
-	for i := 0; i < len(records)-1; i++ {
-		for j := 0; j < len(records)-i-1; j++ {
-			if records[j].Evaluation < records[j+1].Evaluation {
-				records[j], records[j+1] = records[j+1], records[j]
-			}
-		}
-	}
+	// Сортируем по оценке (DESC) используя sort.Slice
+	sort.Slice(records, func(i, j int) bool {
+		return records[i].Evaluation > records[j].Evaluation
+	})
 
 	// Ограничиваем результат
 	if len(records) > limit {
@@ -323,19 +320,21 @@ func (d *Database) Close() error {
 
 // GenerateBoardHash генерирует хеш для позиции на доске
 func GenerateBoardHash(board *game.Board) string {
-	hash := ""
+	var builder strings.Builder
+	builder.Grow(64) // Pre-allocate for 64 characters
+	
 	for row := 0; row < 8; row++ {
 		for col := 0; col < 8; col++ {
 			piece := board.Cells[row][col]
 			if piece.Type == game.Empty {
-				hash += "."
+				builder.WriteByte('.')
 			} else {
 				symbol := pieceToChar(piece)
-				hash += string(symbol)
+				builder.WriteRune(symbol)
 			}
 		}
 	}
-	return hash
+	return builder.String()
 }
 
 // pieceToChar преобразует фигуру в символ
