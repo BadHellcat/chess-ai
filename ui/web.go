@@ -74,6 +74,11 @@ func (w *WebUI) handleState(rw http.ResponseWriter, r *http.Request) {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
+	w.writeState(rw)
+}
+
+// writeState writes the current board state to the response (must be called with mutex held)
+func (w *WebUI) writeState(rw http.ResponseWriter) {
 	state := BoardState{
 		CurrentTurn: colorToString(w.board.CurrentTurn),
 		GameOver:    w.board.GameOver,
@@ -108,16 +113,17 @@ type MoveRequest struct {
 // handleMove обрабатывает ход игрока
 func (w *WebUI) handleMove(rw http.ResponseWriter, r *http.Request) {
 	w.mutex.Lock()
-	defer w.mutex.Unlock()
 
 	var req MoveRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		w.mutex.Unlock()
 		http.Error(rw, err.Error(), http.StatusBadRequest)
 		return
 	}
 
 	if req.FromRow < 0 || req.FromRow > 7 || req.FromCol < 0 || req.FromCol > 7 ||
 		req.ToRow < 0 || req.ToRow > 7 || req.ToCol < 0 || req.ToCol > 7 {
+		w.mutex.Unlock()
 		http.Error(rw, "Invalid coordinates", http.StatusBadRequest)
 		return
 	}
@@ -128,29 +134,56 @@ func (w *WebUI) handleMove(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	if !w.board.IsValidMove(move) {
+		w.mutex.Unlock()
 		http.Error(rw, "Invalid move", http.StatusBadRequest)
 		return
 	}
 
 	w.board.MakeMove(move)
 
+	// Send response immediately after player's move
+	w.writeState(rw)
+	w.mutex.Unlock()
+
+	// Process AI move asynchronously if it's AI's turn
 	if !w.board.GameOver && w.board.CurrentTurn == w.agent.Color {
-		aiMove := w.agent.ChooseMove(w.board)
-		w.board.MakeMove(aiMove)
-	}
+		go func() {
+			w.mutex.Lock()
+			defer w.mutex.Unlock()
 
-	if w.board.GameOver {
-		gameNumber := len(w.statistics.GetStats()) + 1
-		result := stats.GameResult{
-			GameNumber: gameNumber,
-			Winner:     colorToString(w.board.Winner),
-			Epsilon:    w.agent.Epsilon,
-			MovesCount: 0,
-		}
-		w.statistics.AddGame(result)
-	}
+			// Double check game is still not over (could have changed)
+			if !w.board.GameOver && w.board.CurrentTurn == w.agent.Color {
+				aiMove := w.agent.ChooseMove(w.board)
+				w.board.MakeMove(aiMove)
 
-	w.handleState(rw, r)
+				if w.board.GameOver {
+					gameNumber := len(w.statistics.GetStats()) + 1
+					result := stats.GameResult{
+						GameNumber: gameNumber,
+						Winner:     colorToString(w.board.Winner),
+						Epsilon:    w.agent.Epsilon,
+						MovesCount: 0,
+					}
+					w.statistics.AddGame(result)
+				}
+			}
+		}()
+	} else if w.board.GameOver {
+		// Handle game over for player's winning move
+		go func() {
+			w.mutex.Lock()
+			defer w.mutex.Unlock()
+
+			gameNumber := len(w.statistics.GetStats()) + 1
+			result := stats.GameResult{
+				GameNumber: gameNumber,
+				Winner:     colorToString(w.board.Winner),
+				Epsilon:    w.agent.Epsilon,
+				MovesCount: 0,
+			}
+			w.statistics.AddGame(result)
+		}()
+	}
 }
 
 // handleReset сбрасывает игру
