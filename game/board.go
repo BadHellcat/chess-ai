@@ -327,12 +327,8 @@ func (b *Board) isPathClear(move Move) bool {
 func (b *Board) MakeMove(move Move) {
 	piece := b.Cells[move.From.Row][move.From.Col]
 	
-	// Взятие на проходе
-	_ = false
 	if piece.Type == Pawn && b.EnPassantTarget != nil &&
 		move.To.Row == b.EnPassantTarget.Row && move.To.Col == b.EnPassantTarget.Col {
-		_ = true
-		// Удаляем взятую пешку
 		if piece.Color == White {
 			b.Cells[move.To.Row+1][move.To.Col] = Piece{Empty, White}
 		} else {

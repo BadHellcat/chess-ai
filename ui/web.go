@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 )
 
 // WebUI представляет веб-интерфейс для игры в шахматы
@@ -37,7 +38,14 @@ func (w *WebUI) Start(port int) error {
 
 	addr := fmt.Sprintf(":%d", port)
 	fmt.Printf("Starting web server on http://localhost%s\n", addr)
-	return http.ListenAndServe(addr, nil)
+	
+	server := &http.Server{
+		Addr:         addr,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 10 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+	return server.ListenAndServe()
 }
 
 // handleIndex возвращает HTML страницу
@@ -82,7 +90,9 @@ func (w *WebUI) handleState(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(state)
+	if err := json.NewEncoder(rw).Encode(state); err != nil {
+		http.Error(rw, "Failed to encode state", http.StatusInternalServerError)
+	}
 }
 
 // MoveRequest представляет запрос на ход
@@ -104,6 +114,12 @@ func (w *WebUI) handleMove(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.FromRow < 0 || req.FromRow > 7 || req.FromCol < 0 || req.FromCol > 7 ||
+		req.ToRow < 0 || req.ToRow > 7 || req.ToCol < 0 || req.ToCol > 7 {
+		http.Error(rw, "Invalid coordinates", http.StatusBadRequest)
+		return
+	}
+
 	move := game.Move{
 		From: game.Position{Row: req.FromRow, Col: req.FromCol},
 		To:   game.Position{Row: req.ToRow, Col: req.ToCol},
@@ -116,13 +132,11 @@ func (w *WebUI) handleMove(rw http.ResponseWriter, r *http.Request) {
 
 	w.board.MakeMove(move)
 
-	// Если игра не окончена и очередь AI, делаем ход
 	if !w.board.GameOver && w.board.CurrentTurn == w.agent.Color {
 		aiMove := w.agent.ChooseMove(w.board)
 		w.board.MakeMove(aiMove)
 	}
 
-	// Если игра окончена, сохраняем статистику
 	if w.board.GameOver {
 		gameNumber := len(w.statistics.GetStats()) + 1
 		result := stats.GameResult{
@@ -142,9 +156,43 @@ func (w *WebUI) handleReset(rw http.ResponseWriter, r *http.Request) {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
-	w.board = game.NewBoard()
+	w.board.CurrentTurn = game.White
+	w.board.GameOver = false
+	w.board.Winner = game.White
+	w.board.EnPassantTarget = nil
+	w.board.WhiteKingMoved = false
+	w.board.WhiteRookAMoved = false
+	w.board.WhiteRookHMoved = false
+	w.board.BlackKingMoved = false
+	w.board.BlackRookAMoved = false
+	w.board.BlackRookHMoved = false
+	w.board.MovesCount = 0
+	
+	for i := 0; i < 8; i++ {
+		for j := 0; j < 8; j++ {
+			w.board.Cells[i][j] = game.Piece{Type: game.Empty, Color: game.White}
+		}
+	}
+	
+	w.board.Cells[0] = [8]game.Piece{
+		{game.Rook, game.Black}, {game.Knight, game.Black}, {game.Bishop, game.Black}, {game.Queen, game.Black},
+		{game.King, game.Black}, {game.Bishop, game.Black}, {game.Knight, game.Black}, {game.Rook, game.Black},
+	}
+	for i := 0; i < 8; i++ {
+		w.board.Cells[1][i] = game.Piece{game.Pawn, game.Black}
+	}
+	w.board.Cells[7] = [8]game.Piece{
+		{game.Rook, game.White}, {game.Knight, game.White}, {game.Bishop, game.White}, {game.Queen, game.White},
+		{game.King, game.White}, {game.Bishop, game.White}, {game.Knight, game.White}, {game.Rook, game.White},
+	}
+	for i := 0; i < 8; i++ {
+		w.board.Cells[6][i] = game.Piece{game.Pawn, game.White}
+	}
+	
 	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(map[string]string{"status": "ok"})
+	if err := json.NewEncoder(rw).Encode(map[string]string{"status": "ok"}); err != nil {
+		http.Error(rw, "Failed to encode response", http.StatusInternalServerError)
+	}
 }
 
 // handleStats возвращает статистику
@@ -153,7 +201,9 @@ func (w *WebUI) handleStats(rw http.ResponseWriter, r *http.Request) {
 	defer w.mutex.Unlock()
 
 	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(w.statistics.GetStats())
+	if err := json.NewEncoder(rw).Encode(w.statistics.GetStats()); err != nil {
+		http.Error(rw, "Failed to encode stats", http.StatusInternalServerError)
+	}
 }
 
 // Вспомогательные функции
