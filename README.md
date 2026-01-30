@@ -3,6 +3,8 @@
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8?style=flat&logo=go)](https://golang.org)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-Zero-success)](go.mod)
+[![CI](https://github.com/BadHellcat/chess-ai/workflows/CI/badge.svg)](https://github.com/BadHellcat/chess-ai/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/BadHellcat/chess-ai)](https://goreportcard.com/report/github.com/BadHellcat/chess-ai)
 
 Полнофункциональная шахматная игра с самообучающейся нейронной сетью на чистом Go без использования внешних библиотек.
 
@@ -49,6 +51,16 @@ go build
 
 Откройте браузер на `http://localhost:8080`
 
+### Установка напрямую из репозитория
+
+```bash
+# Установить с помощью go install
+go install github.com/BadHellcat/chess-ai@latest
+
+# Запустить
+chess-ai
+```
+
 ### Терминальный режим
 
 ```bash
@@ -57,6 +69,37 @@ go build
 ```
 
 Формат ходов: `e2 e4` (из e2 в e4)
+
+## 🧪 Тестирование
+
+### Запуск тестов
+
+```bash
+# Запустить все тесты
+go test ./...
+
+# Запустить тесты с подробным выводом
+go test -v ./...
+
+# Запустить тесты с покрытием
+go test -coverprofile=coverage.out ./...
+go tool cover -html=coverage.out
+
+# Использовать Makefile
+make test          # Запустить тесты
+make test-verbose  # Подробный вывод
+make coverage      # Тесты с покрытием
+```
+
+### CI/CD
+
+Проект включает GitHub Actions для автоматического тестирования:
+- ✅ Автоматические тесты при каждом push и pull request
+- ✅ Тестирование на Go 1.21 и 1.22
+- ✅ Проверка форматирования и линтинг кода
+- ✅ Сборка бинарного файла
+
+📚 **Подробная документация по тестированию**: см. [TESTING.md](TESTING.md)
 
 ## 📖 Использование
 
